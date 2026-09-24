@@ -401,7 +401,7 @@ async function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no getUserMedia");
     stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
   } catch (e) {
-    setPlaceholder("Camera unavailable here", "This page's frame does not allow camera access, or permission was denied. Analyze a video file or the sample clip instead, or run the local version for a live camera.", true);
+    setPlaceholder("Camera unavailable here", "Hosted pages like this one are not allowed to use the camera. Try the sample clip or a video file here. For the live camera, run ./serve.sh from the project and open http://localhost:8765.", true);
     return;
   }
   source = "camera"; stage.classList.add("mirror"); video.srcObject = stream; video.loop = false;
@@ -426,22 +426,47 @@ document.addEventListener("keydown", e => {
 });
 
 /* ============================ boot: load the on-device engine ============================ */
+const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
+const describe = e => e instanceof Event
+  ? `a script was blocked or failed to load${e.target && e.target.src ? ` (${e.target.src})` : ""}`
+  : (e && e.message) || String(e);
+function simdSupported() {
+  try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); }
+  catch (e) { return false; }
+}
 (async () => {
   let mod;
   try { mod = await import("./vision_bundle.mjs"); }
-  catch (e) { mod = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs"); }
-  const { FaceLandmarker, FilesetResolver } = mod;
-  const fileset = await FilesetResolver.forVisionTasks("wasm");
-  const make = delegate => FaceLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: "models/face_landmarker.wasm", delegate }, runningMode: "VIDEO", numFaces: 1,
-    outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
-  let lm;
-  try { lm = await make("GPU"); } catch (e) { console.warn("GPU delegate failed, using CPU", e); lm = await make("CPU"); }
+  catch (e) { mod = await import(`${CDN}/vision_bundle.mjs`); }
+  const { FaceLandmarker } = mod;
+  const variant = simdSupported() ? "vision_wasm_internal" : "vision_wasm_nosimd_internal";
+  // Hosted pages may only run scripts from a few CDNs, while fetching bundled files
+  // (the wasm binary, the model) is fine. Try fully local first, then mixed, then CDN.
+  const candidates = [
+    { name: "local files",           wasmLoaderPath: `wasm/${variant}.js`,        wasmBinaryPath: `wasm/${variant}.wasm` },
+    { name: "CDN loader + local wasm", wasmLoaderPath: `${CDN}/wasm/${variant}.js`, wasmBinaryPath: `wasm/${variant}.wasm` },
+    { name: "CDN runtime",           wasmLoaderPath: `${CDN}/wasm/${variant}.js`, wasmBinaryPath: `${CDN}/wasm/${variant}.wasm` },
+  ];
+  const errors = [];
+  let lm = null, used = null;
+  for (const c of candidates) {
+    const fileset = { wasmLoaderPath: c.wasmLoaderPath, wasmBinaryPath: c.wasmBinaryPath };
+    for (const delegate of ["GPU", "CPU"]) {
+      try {
+        lm = await FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: "models/face_landmarker.wasm", delegate }, runningMode: "VIDEO", numFaces: 1,
+          outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
+        used = `${c.name}, ${delegate}`; break;
+      } catch (e) { errors.push(`${c.name}/${delegate}: ${describe(e)}`); console.warn("engine init failed", c.name, delegate, e); }
+    }
+    if (lm) break;
+  }
+  if (!lm) throw new Error(errors.join(" · "));
   engine = new FaceEngine(lm);
-  $("perf").textContent = "engine ready";
+  $("perf").textContent = "engine ready (" + used + ")";
   setPlaceholder("Engine ready", "Start the camera for a live reading, or analyze a video file.");
   for (const id of ["btn-camera", "btn-file", "btn-sample"]) $(id).disabled = false;
   renderPanel();
   if (location.hash === "#sample") $("btn-sample").click();
-})().catch(e => { console.error(e); setPlaceholder("Engine failed to load", String(e), true); });
+})().catch(e => { console.error(e); setPlaceholder("Engine failed to load", describe(e), true); });
 </script>
