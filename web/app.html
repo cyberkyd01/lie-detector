@@ -100,7 +100,7 @@
         <canvas id="overlay"></canvas>
         <div class="placeholder" id="placeholder">
           <p id="ph-title" style="font-family:var(--display); font-size:22px; text-transform:uppercase; letter-spacing:.05em">Loading face engine…</p>
-          <p id="ph-text" class="hint" style="color:#B7C0CE">Downloading the on-device model (about 27 MB on first load).</p>
+          <p id="ph-text" class="hint" style="color:#B7C0CE">Loading the on-device face model.</p>
         </div>
         <div class="banner" id="banner"><div class="big" id="banner-big">TRUTH</div><div class="small" id="banner-small"></div></div>
       </div>
@@ -409,12 +409,15 @@ async function startCamera() {
 }
 async function startFile(url, name) {
   stop(); source = name; stage.classList.remove("mirror"); video.srcObject = null; video.src = url; video.loop = false;
-  try { await video.play(); } catch (e) { setPlaceholder("Could not play that file", String(e), true); return; }
-  analyzer.reset(false); analyzer.recalibrate(); running = true; setPlaceholder(null); loop();
+  try { await video.play(); } catch (e) { setPlaceholder("Could not play that file", String(e), true); return false; }
+  analyzer.reset(false); analyzer.recalibrate(); running = true; setPlaceholder(null); loop(); return true;
 }
 $("btn-camera").onclick = startCamera;
 $("file").onchange = e => { const f = e.target.files[0]; if (!f) return; if (fileUrl) URL.revokeObjectURL(fileUrl); fileUrl = URL.createObjectURL(f); startFile(fileUrl, f.name); };
-$("btn-sample").onclick = () => startFile("sample/synthetic_face.mp4", "sample clip");
+$("btn-sample").onclick = async () => {
+  if (embedded && embedded.sample && await startFile(embedded.sample, "sample clip")) return;
+  await startFile("sample/synthetic_face.mp4", "sample clip");
+};
 $("btn-question").onclick = () => { const res = analyzer.toggleQuestion(); if (res) announce(res); renderPanel(); };
 $("btn-recal").onclick = () => { analyzer.recalibrate(); renderPanel(); };
 $("btn-mesh").onclick = () => { showMesh = !showMesh; $("btn-mesh").textContent = "Mesh: " + (showMesh ? "on" : "off"); };
@@ -426,7 +429,9 @@ document.addEventListener("keydown", e => {
 });
 
 /* ============================ boot: load the on-device engine ============================ */
+/*__EMBEDDED_ASSETS__*/
 const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
+const embedded = typeof EMBEDDED !== "undefined" ? EMBEDDED : null;   // set by build_web.py in web/dist
 const describe = e => e instanceof Event
   ? `a script was blocked or failed to load${e.target && e.target.src ? ` (${e.target.src})` : ""}`
   : (e && e.message) || String(e);
@@ -434,34 +439,64 @@ function simdSupported() {
   try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])); }
   catch (e) { return false; }
 }
+function b64ToBytes(b64) { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+async function gunzip(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 (async () => {
   let mod;
   try { mod = await import("./vision_bundle.mjs"); }
   catch (e) { mod = await import(`${CDN}/vision_bundle.mjs`); }
   const { FaceLandmarker } = mod;
   const variant = simdSupported() ? "vision_wasm_internal" : "vision_wasm_nosimd_internal";
-  // Hosted pages may only run scripts from a few CDNs, while fetching bundled files
-  // (the wasm binary, the model) is fine. Try fully local first, then mixed, then CDN.
-  const candidates = [
-    { name: "local files",           wasmLoaderPath: `wasm/${variant}.js`,        wasmBinaryPath: `wasm/${variant}.wasm` },
-    { name: "CDN loader + local wasm", wasmLoaderPath: `${CDN}/wasm/${variant}.js`, wasmBinaryPath: `wasm/${variant}.wasm` },
-    { name: "CDN runtime",           wasmLoaderPath: `${CDN}/wasm/${variant}.js`, wasmBinaryPath: `${CDN}/wasm/${variant}.wasm` },
-  ];
+
+  // Embedded build: the wasm runtime and model travel inside the page, so nothing
+  // has to be fetched from the host (hosted pages may refuse such fetches).
+  let wasmBytes = null, modelBytes = null;
+  if (embedded) {
+    setPlaceholder("Loading face engine…", "Unpacking the on-device model.");
+    try {
+      if (variant === "vision_wasm_internal" && embedded.wasm_gz) wasmBytes = await gunzip(b64ToBytes(embedded.wasm_gz));
+      if (embedded.model_gz) modelBytes = await gunzip(b64ToBytes(embedded.model_gz));
+    } catch (e) { console.warn("embedded assets could not be unpacked", e); wasmBytes = modelBytes = null; }
+  }
+
+  const candidates = [];
+  if (wasmBytes) {
+    candidates.push({ name: "local loader + embedded engine", loader: `wasm/${variant}.js`,        bytes: wasmBytes });
+    candidates.push({ name: "CDN loader + embedded engine",   loader: `${CDN}/wasm/${variant}.js`, bytes: wasmBytes });
+  }
+  candidates.push({ name: "local files",             loader: `wasm/${variant}.js`,        bin: `wasm/${variant}.wasm` });
+  candidates.push({ name: "CDN loader + local wasm", loader: `${CDN}/wasm/${variant}.js`, bin: `wasm/${variant}.wasm` });
+  candidates.push({ name: "CDN runtime",             loader: `${CDN}/wasm/${variant}.js`, bin: `${CDN}/wasm/${variant}.wasm` });
+
   const errors = [];
   let lm = null, used = null;
   for (const c of candidates) {
-    const fileset = { wasmLoaderPath: c.wasmLoaderPath, wasmBinaryPath: c.wasmBinaryPath };
     for (const delegate of ["GPU", "CPU"]) {
       try {
-        lm = await FaceLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: "models/face_landmarker.wasm", delegate }, runningMode: "VIDEO", numFaces: 1,
-          outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
+        // MediaPipe hands a pre-existing self.Module to the Emscripten factory; a
+        // wasmBinary on it makes the runtime skip fetching the .wasm entirely.
+        self.Module = c.bytes ? { wasmBinary: c.bytes } : undefined;
+        const baseOptions = modelBytes ? { modelAssetBuffer: modelBytes, delegate }
+                                       : { modelAssetPath: "models/face_landmarker.wasm", delegate };
+        lm = await FaceLandmarker.createFromOptions(
+          { wasmLoaderPath: c.loader, wasmBinaryPath: c.bin || `wasm/${variant}.wasm` },
+          { baseOptions, runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
         used = `${c.name}, ${delegate}`; break;
       } catch (e) { errors.push(`${c.name}/${delegate}: ${describe(e)}`); console.warn("engine init failed", c.name, delegate, e); }
     }
     if (lm) break;
   }
-  if (!lm) throw new Error(errors.join(" · "));
+  self.Module = undefined;
+  if (!lm) {
+    const probe = async url => { try { const r = await fetch(url, { headers: { Range: "bytes=0-7" } }); await r.arrayBuffer();
+      return `${r.status}${r.ok ? "" : " " + r.statusText}`; } catch (e) { return "rejected: " + ((e && e.message) || e); } };
+    const probes = [];
+    for (const f of ["models/face_landmarker.wasm", `wasm/${variant}.wasm`]) probes.push(`${f} → ${await probe(f)}`);
+    throw new Error(errors.join(" · ") + " || file fetch probes: " + probes.join("; "));
+  }
   engine = new FaceEngine(lm);
   $("perf").textContent = "engine ready (" + used + ")";
   setPlaceholder("Engine ready", "Start the camera for a live reading, or analyze a video file.");

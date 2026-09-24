@@ -27,9 +27,14 @@ The same engine and scoring also run in the browser, on-device via WebAssembly:
 ./serve.sh        # then open http://localhost:8765 for a live camera
 ```
 
-Append `#sample` to the URL to auto-play the bundled sample clip. The page in
-`web/app.html` is also published as a Claude artifact; hosted pages cannot use
-the camera, so there it analyzes uploaded clips or the sample.
+Append `#sample` to the URL to auto-play the bundled sample clip.
+
+`web/app.html` is the source page and loads the engine from the files next to
+it. For hosts that cannot serve those files (the published Claude artifact),
+`python3 build_web.py` writes `web/dist/index.html`, a single 9 MB page with
+the wasm runtime, model and sample clip embedded (gzip + base64, inflated in
+the browser); only the tiny loader script comes from a CDN. Hosted pages cannot
+use the camera, so there it analyzes uploaded clips or the sample.
 
 ## How to use it
 
