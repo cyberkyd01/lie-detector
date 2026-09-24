@@ -1,0 +1,447 @@
+<title>Lie Detector</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #F2F4F7; --panel: #FFFFFF; --panel-2: #E9EDF3; --line: #D3D9E3;
+    --text: #141A24; --muted: #5C6675; --accent: #0FA99A;
+    --good: #2E9E4F; --warn: #D98B12; --bad: #D8403F;
+    --stage: #0B0E13; --track: #DCE2EA;
+    --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+    --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0F1218; --panel: #171C25; --panel-2: #1F2632; --line: #2B3442;
+      --text: #E6EAF0; --muted: #8A94A6; --accent: #2FD3C2;
+      --good: #4CC96B; --warn: #F5B23B; --bad: #F0504F;
+      --stage: #05070A; --track: #262E3B;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0F1218; --panel: #171C25; --panel-2: #1F2632; --line: #2B3442;
+    --text: #E6EAF0; --muted: #8A94A6; --accent: #2FD3C2;
+    --good: #4CC96B; --warn: #F5B23B; --bad: #F0504F;
+    --stage: #05070A; --track: #262E3B;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--body); font-size: 14px; line-height: 1.45; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 16px 32px; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: 34px; letter-spacing: .02em; margin: 0; text-transform: uppercase; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; background: var(--stage); border-radius: 6px; overflow: hidden; aspect-ratio: 4 / 3; max-width: 100%; }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .stage.mirror video, .stage.mirror canvas { transform: scaleX(-1); }
+  .stage .placeholder { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: #B7C0CE; padding: 24px; gap: 10px; }
+  .stage .placeholder p { margin: 0; max-width: 42ch; }
+  .banner { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,.6); color: #fff; text-align: center; padding: 18px 12px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .banner.show { opacity: 1; }
+  .banner .big { font-family: var(--display); font-size: clamp(36px, 8vw, 64px); font-weight: 700; letter-spacing: .04em; line-height: 1; }
+  .banner .small { font-family: var(--mono); font-size: 13px; margin-top: 8px; opacity: .9; }
+  .banner.truthful .big { color: var(--good); } .banner.inconclusive .big { color: var(--warn); } .banner.deceptive .big { color: var(--bad); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: 500 14px var(--body); padding: 9px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #041311; font-weight: 600; }
+  button.primary:disabled, button:disabled { opacity: .45; cursor: not-allowed; }
+  button.question { min-width: 170px; }
+  button.question.open { background: var(--warn); border-color: var(--warn); color: #1a1200; }
+  .file { position: relative; overflow: hidden; }
+  .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .hint.err { color: var(--bad); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; display: grid; gap: 14px; align-content: start; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .label { font-family: var(--display); text-transform: uppercase; letter-spacing: .08em; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .state { font-family: var(--display); font-size: 26px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+  .state.noface { color: var(--muted); } .state.calibrating { color: var(--accent); } .state.ready { color: var(--text); } .state.question { color: var(--warn); }
+  .meter { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .meter > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+  .score { font-family: var(--display); font-size: 56px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .gauge { position: relative; height: 22px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .gauge > i { display: block; height: 100%; width: 0; transition: width .12s linear, background .3s; }
+  .gauge > b { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text); opacity: .5; }
+  .verdict-live { font-family: var(--display); font-size: 20px; font-weight: 700; letter-spacing: .05em; }
+  .c-good { color: var(--good); } .c-warn { color: var(--warn); } .c-bad { color: var(--bad); }
+  .bg-good { background: var(--good); } .bg-warn { background: var(--warn); } .bg-bad { background: var(--bad); }
+  .cues { display: grid; grid-template-columns: 110px 1fr; gap: 8px 10px; align-items: center; }
+  .cues .name { font-size: 12.5px; color: var(--muted); }
+  .cues .bar { height: 11px; background: var(--track); border-radius: 3px; overflow: hidden; }
+  .cues .bar > i { display: block; height: 100%; width: 0; transition: width .12s linear, background .3s; }
+  .mono { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .history { display: grid; gap: 4px; font-family: var(--mono); font-size: 13px; }
+  .history div { display: flex; justify-content: space-between; gap: 8px; }
+  .history .empty { color: var(--muted); }
+  .note { border-top: 1px solid var(--line); padding-top: 10px; font-size: 12.5px; color: var(--muted); }
+  kbd { font-family: var(--mono); font-size: 11.5px; padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); }
+  @media (prefers-reduced-motion: reduce) { .banner, .meter > i, .gauge > i, .cues .bar > i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Lie Detector</h1>
+    <span class="sub">On-device facial reading engine. Nothing leaves your browser.</span>
+  </header>
+
+  <div class="grid">
+    <div style="display:grid; gap:10px; min-width:0">
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="placeholder" id="placeholder">
+          <p id="ph-title" style="font-family:var(--display); font-size:22px; text-transform:uppercase; letter-spacing:.05em">Loading face engine…</p>
+          <p id="ph-text" class="hint" style="color:#B7C0CE">Downloading the on-device model (about 27 MB on first load).</p>
+        </div>
+        <div class="banner" id="banner"><div class="big" id="banner-big">TRUTH</div><div class="small" id="banner-small"></div></div>
+      </div>
+      <div class="controls">
+        <button class="primary" id="btn-camera" disabled>Start camera</button>
+        <button class="file" id="btn-file" disabled>Analyze a video file<input type="file" id="file" accept="video/*"></button>
+        <button id="btn-sample" disabled>Try the sample clip</button>
+        <button class="question" id="btn-question" disabled>Open a question</button>
+        <button id="btn-recal" disabled>Recalibrate</button>
+        <button id="btn-mesh">Mesh: on</button>
+        <button id="btn-speak">Speech: off</button>
+      </div>
+      <div class="hint" id="hint">Keys: <kbd>Space</kbd> open / close a question · <kbd>C</kbd> recalibrate · <kbd>M</kbd> mesh · <kbd>S</kbd> speech</div>
+    </div>
+
+    <aside class="panel">
+      <div>
+        <div class="label">State</div>
+        <div class="state noface" id="state">No face</div>
+        <div class="meter" id="calib-meter" hidden><i id="calib-fill"></i></div>
+        <div class="hint" id="state-hint">Start the camera, face it, and answer easy truthful questions for 10 seconds so the engine learns your baseline.</div>
+      </div>
+      <div>
+        <div class="row"><div class="label">Deception score</div><div class="score c-good" id="score">0</div></div>
+        <div class="gauge"><i id="gauge-fill" class="bg-good"></i><b style="left:40%"></b><b style="left:60%"></b></div>
+        <div class="verdict-live c-good" id="verdict-live">&nbsp;</div>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:8px">Cues vs. your baseline</div>
+        <div class="cues" id="cues"></div>
+        <div class="mono" id="blink-line" style="margin-top:8px">blinks/min — (base —)</div>
+        <div class="mono" id="micro-line">last micro-expression: —</div>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:6px">Verdicts</div>
+        <div class="history" id="history"><div class="empty">No questions yet.</div></div>
+      </div>
+      <div class="note">Facial cues cannot prove a lie. This scores stress and discomfort relative to your own calibrated baseline. For demos and fun only.</div>
+      <div class="mono" id="perf">engine idle</div>
+    </aside>
+  </div>
+</div>
+
+<script type="module">
+/* ============================ constants (mirrors liedetector/analysis.py) ============================ */
+const CONTINUOUS_WINDOW = 3.0, EVENT_WINDOW = 10.0;
+const INDICATORS = ["blink_rate","gaze_aversion","lip_press","brow_tension","head_motion","micro_expr","fake_smile","eye_arousal"];
+const LABELS = { blink_rate:"Blink rate", gaze_aversion:"Gaze aversion", lip_press:"Lip press", brow_tension:"Brow tension",
+  head_motion:"Head motion", micro_expr:"Micro-expr.", fake_smile:"Fake smile", eye_arousal:"Eye arousal" };
+const WEIGHTS = { blink_rate:.15, gaze_aversion:.15, lip_press:.15, brow_tension:.10, head_motion:.10, micro_expr:.15, fake_smile:.10, eye_arousal:.10 };
+const STD_FLOOR = { gaze_aversion:.08, lip_press:.04, brow_tension:.04, head_motion:4.0, fake_smile:.04, eye_arousal:.04 };
+const GAIN = 1.75, Z_SAT = 2.5;
+const MICRO_SHAPES = ["mouthSmileLeft","mouthSmileRight","mouthFrownLeft","mouthFrownRight","noseSneerLeft","noseSneerRight","browInnerUp",
+  "browDownLeft","browDownRight","eyeWideLeft","eyeWideRight","mouthStretchLeft","mouthStretchRight","mouthPressLeft","mouthPressRight","jawOpen"];
+const MICRO_MIN = .04, MICRO_MAX = .5, MICRO_ON = .25, MICRO_OFF = .10;
+const LEFT_EYE = [33,160,158,133,153,144], RIGHT_EYE = [362,385,387,263,373,380];
+const CALIB_SECONDS = 10;
+
+/* ============================ face reading engine ============================ */
+class FaceEngine {
+  constructor(lm) { this.lm = lm; this.lastTs = -1; this.inferMs = 0; }
+  read(source, tSec, w, h) {
+    let ts = Math.round(tSec * 1000); if (ts <= this.lastTs) ts = this.lastTs + 1; this.lastTs = ts;
+    const t0 = performance.now();
+    const res = this.lm.detectForVideo(source, ts);
+    this.inferMs = performance.now() - t0;
+    if (!res.faceLandmarks || !res.faceLandmarks.length) return null;
+    const pts = res.faceLandmarks[0];
+    const bs = {};
+    if (res.faceBlendshapes && res.faceBlendshapes.length) for (const c of res.faceBlendshapes[0].categories) bs[c.categoryName] = c.score;
+    let yaw = 0, pitch = 0, roll = 0, tr = [0,0,0];
+    if (res.facialTransformationMatrixes && res.facialTransformationMatrixes.length) {
+      const m = res.facialTransformationMatrixes[0].data;          // 4x4 row-major
+      const r = (i,j) => m[i*4+j];
+      const sy = Math.hypot(r(0,0), r(1,0));
+      if (sy > 1e-6) { pitch = Math.atan2(r(2,1), r(2,2)); yaw = Math.atan2(-r(2,0), sy); roll = Math.atan2(r(1,0), r(0,0)); }
+      else { pitch = Math.atan2(-r(1,2), r(1,1)); yaw = Math.atan2(-r(2,0), sy); }
+      yaw *= 180/Math.PI; pitch *= 180/Math.PI; roll *= 180/Math.PI; tr = [r(0,3), r(1,3), r(2,3)];
+    }
+    let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+    for (const p of pts) { if (p.x < x0) x0 = p.x; if (p.y < y0) y0 = p.y; if (p.x > x1) x1 = p.x; if (p.y > y1) y1 = p.y; }
+    const ear = idx => { const p = idx.map(i => pts[i]); const d = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+      return (d(p[1],p[5]) + d(p[2],p[4])) / (2*d(p[0],p[3]) + 1e-6); };
+    return { t: tSec, pts, bs, yaw, pitch, roll, tr, bbox: [x0,y0,x1-x0,y1-y0], earL: ear(LEFT_EYE), earR: ear(RIGHT_EYE),
+      get(n) { return bs[n] || 0; } };
+  }
+}
+
+/* ============================ deception analysis engine ============================ */
+const mean2 = (a,b) => 0.5*(a+b);
+class BlinkDetector {
+  constructor() { this.closed = false; this.events = []; }
+  update(r) {
+    const blink = mean2(r.get("eyeBlinkLeft"), r.get("eyeBlinkRight")), ear = mean2(r.earL, r.earR);
+    const closedNow = blink > .5 || ear < .16, openNow = blink < .3 && ear > .19;
+    if (!this.closed && closedNow) { this.closed = true; }
+    else if (this.closed && openNow) { this.closed = false; this.events.push(r.t); return true; }
+    return false;
+  }
+  countSince(t) { while (this.events.length && this.events[0] < t) this.events.shift(); return this.events.length; }
+}
+class MicroDetector {
+  constructor() { this.tau = 2; this.ema = {}; this.active = {}; this.events = []; this.lastT = null; this.lastLabel = ""; }
+  update(r) {
+    const dt = this.lastT == null ? 0 : Math.max(0, r.t - this.lastT); this.lastT = r.t;
+    const alpha = dt > 0 ? 1 - Math.exp(-dt/this.tau) : 1; const fired = [];
+    for (const n of MICRO_SHAPES) {
+      const v = r.get(n); const base = n in this.ema ? this.ema[n] : v; const dev = v - base;
+      if (n in this.active) {
+        if (dev > MICRO_OFF) this.active[n].peak = Math.max(this.active[n].peak, dev);
+        else { const dur = r.t - this.active[n].onset; delete this.active[n];
+          if (dur >= MICRO_MIN && dur <= MICRO_MAX) { this.events.push([r.t, n]); fired.push(n); this.lastLabel = n; } }
+      } else if (dev > MICRO_ON) this.active[n] = { onset: r.t, peak: dev };
+      if (!(n in this.active)) this.ema[n] = base + alpha*(v - base);
+    }
+    return fired;
+  }
+  countSince(t) { while (this.events.length && this.events[0][0] < t) this.events.shift(); return this.events.length; }
+}
+class Analyzer {
+  constructor(calibSeconds) { this.calibSeconds = calibSeconds; this.reset(true); }
+  reset(full) {
+    this.state = "NO_FACE"; this.baseline = null; this.blinks = new BlinkDetector(); this.micro = new MicroDetector();
+    this.frames = []; this.prev = null; this.calibStart = null; this.calib = []; this.calibBlinks = 0; this.calibMicro = 0;
+    this.score = 0; this.raw = 0; this.ind = {}; this.z = {}; for (const k of INDICATORS) this.ind[k] = 0;
+    this.qScores = []; this.qStart = null; this.qCues = {}; this.liveBlink = 0; this.lostSince = null; this.lastT = 0;
+    if (full) { this.history = []; this.lastVerdict = null; }
+  }
+  recalibrate() {
+    const keep = this.state; this.baseline = null; this.calibStart = null; this.calib = []; this.calibBlinks = 0; this.calibMicro = 0;
+    this.frames = []; this.score = 0; this.qScores = []; this.qStart = null;
+    for (const k of INDICATORS) this.ind[k] = 0;
+    if (keep !== "NO_FACE") this.state = "CALIBRATING";
+  }
+  calibProgress() { return this.calibStart == null ? 0 : Math.min(1, (this.lastT - this.calibStart)/this.calibSeconds); }
+  toggleQuestion() {
+    if (!this.baseline) return null;
+    if (this.state === "QUESTION") return this.closeQuestion();
+    this.state = "QUESTION"; this.qStart = this.lastT; this.qScores = []; this.qCues = {}; for (const k of INDICATORS) this.qCues[k] = 0;
+    return null;
+  }
+  closeQuestion() {
+    const scores = this.qScores.slice(Math.floor(this.qScores.length/6)); this.state = "READY";
+    if (!scores.length) return null;
+    const mean = scores.reduce((a,b)=>a+b,0)/scores.length, peak = Math.max(...scores);
+    const verdict = mean >= 60 ? "DECEPTIVE" : mean >= 40 ? "INCONCLUSIVE" : "TRUTHFUL";
+    const n = Math.max(1, this.qScores.length);
+    const top = Object.entries(this.qCues).sort((a,b)=>b[1]-a[1]).slice(0,3).filter(([k,v]) => v/n > .25).map(([k]) => LABELS[k]);
+    const res = { index: this.history.length+1, start: this.qStart, end: this.lastT, mean, peak, verdict, top };
+    this.history.push(res); this.lastVerdict = res; return res;
+  }
+  update(r, t) {
+    this.lastT = t;
+    if (!r) {
+      if (this.lostSince == null) this.lostSince = t;
+      if (t - this.lostSince > .5) { this.prev = null; if (this.state === "CALIBRATING") this.recalibrate(); this.state = "NO_FACE"; }
+      return;
+    }
+    this.lostSince = null;
+    if (this.state === "NO_FACE") { this.state = this.baseline ? "READY" : "CALIBRATING"; this.prev = null; }
+    const blinked = this.blinks.update(r), microFired = this.micro.update(r);
+    const f = this.features(r); this.prev = r; this.frames.push(f);
+    while (this.frames.length && this.frames[0].t < t - EVENT_WINDOW) this.frames.shift();
+    if (this.state === "CALIBRATING") {
+      if (this.calibStart == null) this.calibStart = t;
+      this.calib.push(f); this.calibBlinks += blinked ? 1 : 0; this.calibMicro += microFired.length;
+      if (t - this.calibStart >= this.calibSeconds) this.finishCalibration(t - this.calibStart);
+      return;
+    }
+    this.computeScore(t);
+    if (this.state === "QUESTION") { this.qScores.push(this.raw); for (const k of INDICATORS) this.qCues[k] += this.ind[k]; }
+  }
+  features(r) {
+    const g = r.get.bind(r);
+    const gaze = Math.max(mean2(g("eyeLookOutLeft"), g("eyeLookInRight")), mean2(g("eyeLookInLeft"), g("eyeLookOutRight")),
+      mean2(g("eyeLookUpLeft"), g("eyeLookUpRight")), mean2(g("eyeLookDownLeft"), g("eyeLookDownRight")));
+    const lip = Math.max(mean2(g("mouthPressLeft"), g("mouthPressRight")), mean2(g("mouthRollUpper"), g("mouthRollLower")));
+    const brow = Math.max(mean2(g("browDownLeft"), g("browDownRight")), g("browInnerUp"));
+    let head = 0;
+    if (this.prev) { const dt = r.t - this.prev.t;
+      if (dt > 1e-3 && dt < 1) { const ang = Math.hypot(r.yaw-this.prev.yaw, r.pitch-this.prev.pitch, r.roll-this.prev.roll)/dt;
+        const tr = Math.hypot(r.tr[0]-this.prev.tr[0], r.tr[1]-this.prev.tr[1], r.tr[2]-this.prev.tr[2])/dt; head = ang + 2*tr; } }
+    const smile = mean2(g("mouthSmileLeft"), g("mouthSmileRight")), duch = mean2(g("cheekSquintLeft"), g("cheekSquintRight"));
+    const asym = Math.abs(g("mouthSmileLeft") - g("mouthSmileRight"));
+    const fake = smile > .2 ? Math.max(0, smile - 1.5*duch) + asym : 0;
+    const arousal = Math.max(mean2(g("eyeWideLeft"), g("eyeWideRight")), mean2(g("eyeSquintLeft"), g("eyeSquintRight")));
+    return { t: r.t, gaze_aversion: gaze, lip_press: lip, brow_tension: brow, head_motion: head, fake_smile: fake, eye_arousal: arousal };
+  }
+  finishCalibration(dur) {
+    const b = { mean: {}, std: {}, blink: 0, micro: 0 };
+    for (const k of Object.keys(STD_FLOOR)) {
+      const a = this.calib.map(f => f[k]); const m = a.reduce((x,y)=>x+y,0)/Math.max(1,a.length);
+      const sd = Math.sqrt(a.reduce((x,y)=>x+(y-m)*(y-m),0)/Math.max(1,a.length));
+      b.mean[k] = m; b.std[k] = Math.max(sd, STD_FLOOR[k]);
+    }
+    b.blink = 60*this.calibBlinks/Math.max(dur, 1e-3); b.micro = this.calibMicro*EVENT_WINDOW/Math.max(dur, 1e-3);
+    this.baseline = b; this.state = "READY";
+  }
+  computeScore(t) {
+    const b = this.baseline, recent = this.frames.filter(f => f.t >= t - CONTINUOUS_WINDOW); if (!recent.length) return;
+    const z = {};
+    for (const k of Object.keys(STD_FLOOR)) { const m = recent.reduce((x,f)=>x+f[k],0)/recent.length; z[k] = (m - b.mean[k])/b.std[k]; }
+    const span = Math.min(EVENT_WINDOW, Math.max(1, t - this.frames[0].t));
+    const blinkRate = 60*this.blinks.countSince(t - EVENT_WINDOW)/span;
+    z.blink_rate = (blinkRate - b.blink)/Math.max(.5*b.blink, 6);
+    const micro = this.micro.countSince(t - EVENT_WINDOW)*(EVENT_WINDOW/span);
+    z.micro_expr = (micro - b.micro)/Math.max(.5*b.micro, 1);
+    let raw = 0;
+    for (const k of INDICATORS) { const zz = k === "blink_rate" ? Math.abs(z[k]) : z[k];
+      this.ind[k] = Math.min(1, Math.max(0, zz/Z_SAT)); raw += WEIGHTS[k]*this.ind[k]; }
+    this.raw = Math.min(1, Math.max(0, raw*GAIN))*100; this.score += .12*(this.raw - this.score); this.z = z; this.liveBlink = blinkRate;
+  }
+  liveVerdict() { return this.score >= 60 ? "DECEPTIVE" : this.score >= 40 ? "INCONCLUSIVE" : "TRUTHFUL"; }
+}
+
+/* ============================ app ============================ */
+const $ = id => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d"), stage = $("stage");
+const analyzer = new Analyzer(CALIB_SECONDS);
+let engine = null, running = false, showMesh = true, speak = false, source = "none", rafId = 0, fps = 0, fpsN = 0, fpsT = performance.now();
+let stream = null, fileUrl = null, bannerTimer = 0;
+
+const cuesEl = $("cues"); const cueBars = {};
+for (const k of INDICATORS) { const n = document.createElement("div"); n.className = "name"; n.textContent = LABELS[k];
+  const bar = document.createElement("div"); bar.className = "bar"; const i = document.createElement("i"); i.className = "bg-good"; bar.appendChild(i);
+  cuesEl.append(n, bar); cueBars[k] = i; }
+
+const cls = s => s >= 60 ? "bad" : s >= 40 ? "warn" : "good";
+const VERDICT_TEXT = { TRUTHFUL: "TRUTH", INCONCLUSIVE: "INCONCLUSIVE", DECEPTIVE: "LIE DETECTED" };
+const SPOKEN = { TRUTHFUL: "That appears to be the truth.", INCONCLUSIVE: "Inconclusive.", DECEPTIVE: "Lie detected." };
+
+function setPlaceholder(title, text, err) {
+  $("placeholder").hidden = !title; if (!title) return;
+  $("ph-title").textContent = title; $("ph-text").textContent = text || ""; $("ph-text").style.color = err ? "var(--bad)" : "";
+}
+function announce(res) {
+  const b = $("banner"); b.className = "banner show " + res.verdict.toLowerCase();
+  $("banner-big").textContent = VERDICT_TEXT[res.verdict];
+  $("banner-small").textContent = `score ${res.mean.toFixed(0)}` + (res.top.length ? `  |  ${res.top.join(", ")}` : "");
+  clearTimeout(bannerTimer); bannerTimer = setTimeout(() => b.classList.remove("show"), 4000);
+  if (speak && "speechSynthesis" in window) { try { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(SPOKEN[res.verdict])); } catch (e) {} }
+  const h = $("history"); if (analyzer.history.length === 1) h.innerHTML = "";
+  const d = document.createElement("div"); d.className = "c-" + cls(res.mean);
+  d.innerHTML = `<span>Q${res.index}: ${res.verdict}</span><span>${res.mean.toFixed(0)}${res.top.length ? " · " + res.top.join(", ") : ""}</span>`;
+  h.prepend(d);
+}
+function renderPanel() {
+  const st = analyzer.state, stEl = $("state");
+  stEl.className = "state " + { NO_FACE: "noface", CALIBRATING: "calibrating", READY: "ready", QUESTION: "question" }[st];
+  stEl.textContent = { NO_FACE: "No face", CALIBRATING: "Calibrating", READY: "Ready", QUESTION: "Analyzing" }[st];
+  $("calib-meter").hidden = st !== "CALIBRATING"; $("calib-fill").style.width = (analyzer.calibProgress()*100).toFixed(1) + "%";
+  $("state-hint").textContent = {
+    NO_FACE: running ? "No face detected. Face the camera." : "Start the camera, face it, and answer easy truthful questions for 10 seconds so the engine learns your baseline.",
+    CALIBRATING: "Look at the camera and answer a simple question truthfully (your name, the day).",
+    READY: "Press Open a question (or Space), ask it, then close it for the verdict.",
+    QUESTION: `Question ${analyzer.history.length+1} · ${(analyzer.lastT - (analyzer.qStart||0)).toFixed(1)} s` }[st];
+  const ready = !!analyzer.baseline && (st === "READY" || st === "QUESTION"); const s = ready ? analyzer.score : 0; const c = cls(s);
+  $("score").textContent = s.toFixed(0); $("score").className = "score c-" + c;
+  $("gauge-fill").style.width = s.toFixed(1) + "%"; $("gauge-fill").className = "bg-" + c;
+  $("verdict-live").textContent = ready ? analyzer.liveVerdict() : " "; $("verdict-live").className = "verdict-live c-" + c;
+  for (const k of INDICATORS) { const v = ready ? analyzer.ind[k] : 0; cueBars[k].style.width = (v*100).toFixed(1) + "%"; cueBars[k].className = "bg-" + cls(v*100); }
+  $("blink-line").textContent = ready ? `blinks/min ${analyzer.liveBlink.toFixed(1)} (base ${analyzer.baseline.blink.toFixed(1)})` : "blinks/min — (base —)";
+  $("micro-line").textContent = "last micro-expression: " + (analyzer.micro.lastLabel || "—");
+  const qb = $("btn-question"); qb.disabled = !analyzer.baseline || !running;
+  qb.textContent = st === "QUESTION" ? "Close question → verdict" : "Open a question"; qb.classList.toggle("open", st === "QUESTION");
+  $("btn-recal").disabled = !running;
+}
+function drawOverlay(r) {
+  const w = video.videoWidth, h = video.videoHeight; if (!w) return;
+  if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
+  ctx.clearRect(0, 0, w, h); if (!r) return;
+  const [bx, by, bw, bh] = r.bbox; ctx.strokeStyle = "#2FD3C2"; ctx.lineWidth = 1.5; ctx.strokeRect(bx*w, by*h, bw*w, bh*h);
+  if (showMesh) { ctx.fillStyle = "rgba(80,255,190,.9)"; for (let i = 0; i < r.pts.length; i += 2) { const p = r.pts[i]; ctx.fillRect(p.x*w - 1, p.y*h - 1, 2, 2); } }
+}
+function loop() {
+  if (!running) return;
+  if (video.readyState >= 2 && !video.paused && !video.ended) {
+    const t = source === "camera" ? performance.now()/1000 : video.currentTime;
+    let r = null;
+    try { r = engine.read(video, t, video.videoWidth, video.videoHeight); } catch (e) { console.error(e); }
+    analyzer.update(r, t); drawOverlay(r);
+    fpsN++; const now = performance.now(); if (now - fpsT > 500) { fps = fpsN*1000/(now - fpsT); fpsN = 0; fpsT = now; }
+    $("perf").textContent = `${fps.toFixed(1)} fps · inference ${engine.inferMs.toFixed(1)} ms · ${source}`;
+  } else if (video.ended && source !== "camera") {
+    if (analyzer.state === "QUESTION") { const res = analyzer.toggleQuestion(); if (res) announce(res); }
+    stop(); setPlaceholder("Clip finished", "Load another file, replay the sample, or start the camera."); return;
+  }
+  renderPanel(); rafId = requestAnimationFrame(loop);
+}
+function stop() {
+  running = false; cancelAnimationFrame(rafId);
+  if (stream) { stream.getTracks().forEach(tr => tr.stop()); stream = null; }
+  video.pause(); analyzer.update(null, analyzer.lastT + 1); renderPanel();
+}
+async function startCamera() {
+  stop(); setPlaceholder("Requesting camera…", "Allow camera access when your browser asks.");
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("no getUserMedia");
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }, audio: false });
+  } catch (e) {
+    setPlaceholder("Camera unavailable here", "This page's frame does not allow camera access, or permission was denied. Analyze a video file or the sample clip instead, or run the local version for a live camera.", true);
+    return;
+  }
+  source = "camera"; stage.classList.add("mirror"); video.srcObject = stream; video.loop = false;
+  await video.play(); analyzer.reset(false); analyzer.recalibrate(); running = true; setPlaceholder(null); loop();
+}
+async function startFile(url, name) {
+  stop(); source = name; stage.classList.remove("mirror"); video.srcObject = null; video.src = url; video.loop = false;
+  try { await video.play(); } catch (e) { setPlaceholder("Could not play that file", String(e), true); return; }
+  analyzer.reset(false); analyzer.recalibrate(); running = true; setPlaceholder(null); loop();
+}
+$("btn-camera").onclick = startCamera;
+$("file").onchange = e => { const f = e.target.files[0]; if (!f) return; if (fileUrl) URL.revokeObjectURL(fileUrl); fileUrl = URL.createObjectURL(f); startFile(fileUrl, f.name); };
+$("btn-sample").onclick = () => startFile("sample/synthetic_face.mp4", "sample clip");
+$("btn-question").onclick = () => { const res = analyzer.toggleQuestion(); if (res) announce(res); renderPanel(); };
+$("btn-recal").onclick = () => { analyzer.recalibrate(); renderPanel(); };
+$("btn-mesh").onclick = () => { showMesh = !showMesh; $("btn-mesh").textContent = "Mesh: " + (showMesh ? "on" : "off"); };
+$("btn-speak").onclick = () => { speak = !speak; $("btn-speak").textContent = "Speech: " + (speak ? "on" : "off"); };
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space") { e.preventDefault(); $("btn-question").click(); }
+  else if (e.key === "c") $("btn-recal").click(); else if (e.key === "m") $("btn-mesh").click(); else if (e.key === "s") $("btn-speak").click();
+});
+
+/* ============================ boot: load the on-device engine ============================ */
+(async () => {
+  let mod;
+  try { mod = await import("./vision_bundle.mjs"); }
+  catch (e) { mod = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs"); }
+  const { FaceLandmarker, FilesetResolver } = mod;
+  const fileset = await FilesetResolver.forVisionTasks("wasm");
+  const make = delegate => FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "models/face_landmarker.wasm", delegate }, runningMode: "VIDEO", numFaces: 1,
+    outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true });
+  let lm;
+  try { lm = await make("GPU"); } catch (e) { console.warn("GPU delegate failed, using CPU", e); lm = await make("CPU"); }
+  engine = new FaceEngine(lm);
+  $("perf").textContent = "engine ready";
+  setPlaceholder("Engine ready", "Start the camera for a live reading, or analyze a video file.");
+  for (const id of ["btn-camera", "btn-file", "btn-sample"]) $(id).disabled = false;
+  renderPanel();
+  if (location.hash === "#sample") $("btn-sample").click();
+})().catch(e => { console.error(e); setPlaceholder("Engine failed to load", String(e), true); });
+</script>
