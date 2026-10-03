@@ -4,6 +4,10 @@ A webcam "lie detector" that runs entirely on your machine. It opens the
 camera, reads the face with an on-device landmark + expression engine, and
 scores each answer for classic deception "leakage" cues.
 
+> **Installing?** Follow the step-by-step guide: **[INSTALL.md](INSTALL.md)**
+
+> **Deploying to a server?** Follow the step-by-step VPS guide: **[DEPLOY.md](DEPLOY.md)**
+
 > **Honesty note.** No facial-expression method can reliably tell truth from
 > lies, and this tool is no exception. It measures *stress and discomfort
 > relative to your own baseline*. Use it for fun, demos and experiments, never
@@ -18,6 +22,8 @@ scores each answer for classic deception "leakage" cues.
 
 macOS asks for camera permission the first time. If the window never appears,
 grant your terminal app access in **System Settings > Privacy & Security > Camera**.
+
+Step-by-step install for macOS, Windows and Linux: [INSTALL.md](INSTALL.md).
 
 ## Browser version
 
@@ -35,6 +41,9 @@ it. For hosts that cannot serve those files (the published Claude artifact),
 the wasm runtime, model and sample clip embedded (gzip + base64, inflated in
 the browser); only the tiny loader script comes from a CDN. Hosted pages cannot
 use the camera, so there it analyzes uploaded clips or the sample.
+
+To host the browser version on your own server over HTTPS (where the live camera
+does work), follow [DEPLOY.md](DEPLOY.md).
 
 ## How to use it
 
