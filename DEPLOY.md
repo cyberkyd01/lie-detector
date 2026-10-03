@@ -122,10 +122,12 @@ This only adds packages. nginx is installed only when ports 80/443 are free or a
 
 ```bash
 sudo bash -euo pipefail <<'EOF'
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1   # additive only: needrestart must not restart other services
 source /etc/lie-detector/deploy.conf
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl git openssh-client iproute2
+MISSING_PKGS=""; for p in ca-certificates curl git openssh-client iproute2; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || MISSING_PKGS="$MISSING_PKGS $p"; done
+if [ -n "$MISSING_PKGS" ]; then apt-get install -y --no-install-recommends $MISSING_PKGS; fi   # only what's missing - never upgrades installed packages
 WEB=$(ss -ltnpH '( sport = :80 or sport = :443 )' | grep -oE 'users:\(\("[^"]+"' | cut -d'"' -f2 | sort -u | tr '\n' ' ' || true)
 if [ -z "$WEB" ] || [ "$WEB" = "nginx " ]; then
   if ! command -v nginx >/dev/null; then apt-get install -y --no-install-recommends nginx; fi
@@ -217,6 +219,7 @@ The block opens the port in ufw if ufw is active. In domain mode it checks DNS a
 
 ```bash
 sudo bash -euo pipefail <<'EOF'
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1   # additive only: needrestart must not restart other services
 source /etc/lie-detector/deploy.conf
 command -v nginx >/dev/null || { echo "STOP: nginx is not installed (another web server owns 80/443?). Use the Appendix."; exit 1; }
 if [ -n "$DOMAIN" ] && [ -z "$EMAIL" ]; then echo "STOP: set EMAIL= in /etc/$APP/deploy.conf (needed for Let's Encrypt)."; exit 1; fi
