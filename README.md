@@ -104,3 +104,11 @@ is the mean score while it was open: < 40 truthful, 40-60 inconclusive,
 Python 3.10+, a webcam. Tested on macOS (Apple Silicon) with Python 3.13,
 OpenCV 5 and MediaPipe 1.0. On macOS the engine uses the GPU (Metal) delegate
 because MediaPipe's CPU graph aborts there; on Linux/Windows it defaults to CPU.
+
+---
+
+## ⭐ Support
+
+Please give stars and if possible Buy me a coffee (USDT-TRC20) - `TA216k3WgWTrKnUKxZrSDNGzSJj3eHtEcH`
+
+Telegram: [@Cyberkyd](https://t.me/Cyberkyd)
